@@ -72,8 +72,6 @@ void setup() {
 
   SD.begin(chip_select); // initialize sd card
  
-  analogReference(EXTERNAL); // set aref to 3.3V
-
   attachInterrupt(digitalPinToInterrupt(hall_int), hall_interrupt, FALLING);
 
   pinMode(machine_control, OUTPUT);
@@ -111,7 +109,7 @@ void loop() {
         digitalWrite(machine_control, 1) : // every 56s
         digitalWrite(machine_control, 0); // every 4s
   
-      // record time and temp every 5th interval
+      // record info every 5th interval
       if(!(interval_iter % 5)) { // every 20s
         rpm_buffer = read_rpm(); // record rpm
         current_buffer = read_current(curr_pin); // record current
@@ -231,10 +229,16 @@ uint16_t read_rpm(void) {
 }
 
 uint8_t read_current(uint8_t adc_ch) {
+  int16_t adc_val;
   
+  adc_val = analogRead(adc_ch); // read adc
+  adc_val = abs(adc_val - 511); // center value
+  
+  // return current (sensitivity: 100mV / 1A; 2.5V@0A (centered))
+  return(adc_val / 2);
 }
 
 void hall_interrupt(void) {
-  rpm_iter++;
+  rpm_iter++; // increment iterator
 }
 
