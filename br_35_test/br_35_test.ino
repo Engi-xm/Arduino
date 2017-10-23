@@ -2,7 +2,17 @@
 #include <SD.h>
 #include <Wire.h>
 
-#define RTC_ADDR 0b1101000
+#define RTC_ADDR 0b1101000 // rtc i2c address
+#define HALL_INT 2 // hall effect sensor pin for interrupts
+#define RTC_SELECT 4 // cc for sd card (not used)
+#define MACHINE_CTRL 7 // machine control pin (high: machine runs)
+#define OVERHEAT_LED 5 // overheat indicator pin
+#define WRITE_ERR_LED 6 // write error indicator pin
+#define THERM_PIN A1 // thermistor pin
+#define CURR_PIN A3 // current sensor pin
+#define TEMP_LIMIT 100 // max motor temp
+#define INTERVAL 4000 // INTERVAL for measurements
+#define CURR_CALIBRATION 508 // value for centering adc value
 
 struct time_buf {
   uint8_t secs;
@@ -47,15 +57,6 @@ uint16_t temp_lookup[][2] = {
   {257, 125}
 };
 
-const uint8_t hall_int = 2; // hall effect sensor pin for interrupts
-const uint8_t chip_select = 4; // cc for sd card (not used)
-const uint8_t machine_control = 7; // machine control pin (high: machine runs)
-const uint8_t overheat_led = 5; // overheat indicator pin
-const uint8_t write_err_led = 6; // write error indicator pin
-const uint8_t therm_pin = A1; // thermistor pin
-const uint8_t curr_pin = A3; // current sensor pin
-const uint8_t temp_limit = 100; // max motor temp
-const uint32_t interval = 4000; // interval for measurements
 uint8_t interval_iter = 0; // interval iterator
 uint8_t temp_buffer = 0; // temp buffer
 uint8_t current_buffer = 0; // current buffer
@@ -64,41 +65,40 @@ uint16_t cycle_iter = 0; // number of cycles passed
 uint16_t cycle_max = 60000; // number of cycles to run
 uint32_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis, curr_millis; // timing helpers
-time_buf time_buffer; // time buffer
 
 void setup() {
   Serial.begin(9600); // open serial port
   Wire.begin(); // start i2c bus
 
-  SD.begin(chip_select); // initialize sd card
+  SD.begin(RTC_SELECT); // initialize sd card
  
-  attachInterrupt(digitalPinToInterrupt(hall_int), hall_interrupt, FALLING);
+  attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING);
 
-  pinMode(machine_control, OUTPUT);
-  pinMode(overheat_led, OUTPUT);
-  pinMode(write_err_led, OUTPUT);
+  pinMode(MACHINE_CTRL, OUTPUT);
+  pinMode(OVERHEAT_LED, OUTPUT);
+  pinMode(WRITE_ERR_LED, OUTPUT);
 
-  digitalWrite(machine_control, 0);
-  digitalWrite(overheat_led, 0);
-  digitalWrite(write_err_led, 0);
+  digitalWrite(MACHINE_CTRL, 0);
+  digitalWrite(OVERHEAT_LED, 0);
+  digitalWrite(WRITE_ERR_LED, 0);
 }
 
 void loop() {
   // check time
   curr_millis = millis();
 
-  if(curr_millis - prev_millis >= interval) { // if interval reached (every 4s)
+  if(curr_millis - prev_millis >= INTERVAL) { // if INTERVAL reached (every 4s)
     // record time
     prev_millis = curr_millis;
 
     if(cycle_iter < cycle_max) { // if havent finished
       // measure temp
-      temp_buffer = read_temp(therm_pin);
+      temp_buffer = read_temp(THERM_PIN);
       
       // if overheating, rest
-      if(temp_buffer >= temp_limit) {
+      if(temp_buffer >= TEMP_LIMIT) {
         record_to_sd(temp_buffer, 0, 0);
-        digitalWrite(overheat_led, 1); // turn on indicator led
+        digitalWrite(OVERHEAT_LED, 1); // turn on indicator led
         delay(60000);
         record_to_sd(temp_buffer, 0, 0);
         interval_iter = 0;
@@ -106,13 +106,13 @@ void loop() {
       
       // control machine
       ++interval_iter <= 14 ? 
-        digitalWrite(machine_control, 1) : // every 56s
-        digitalWrite(machine_control, 0); // every 4s
+        digitalWrite(MACHINE_CTRL, 1) : // every 56s
+        digitalWrite(MACHINE_CTRL, 0); // every 4s
   
-      // record info every 5th interval
+      // record info every 5th INTERVAL
       if(!(interval_iter % 5)) { // every 20s
         rpm_buffer = read_rpm(); // record rpm
-        current_buffer = read_current(curr_pin); // record current
+        current_buffer = read_current(CURR_PIN); // record current
         record_to_sd(temp_buffer, rpm_buffer, current_buffer);
       }
   
@@ -122,6 +122,14 @@ void loop() {
       }
     }
   }
+
+// SANITY CHECK
+//  delay(5000);
+//  Serial.print(read_temp(THERM_PIN));
+//  Serial.print("\t");
+//  Serial.print(read_current(CURR_PIN));
+//  Serial.print("\t");
+//  Serial.println(read_rpm());
 }
 
 void record_to_sd(uint8_t temp, uint16_t rpm, uint8_t current) {
@@ -150,7 +158,7 @@ void record_to_sd(uint8_t temp, uint16_t rpm, uint8_t current) {
     data_file.print(current);
     data_file.close();
   } else {
-    digitalWrite(write_err_led, 1); // turn on indicator led
+    digitalWrite(WRITE_ERR_LED, 1); // turn on indicator led
   }
 }
 
@@ -217,13 +225,13 @@ uint16_t read_rpm(void) {
   local_prev_millis = local_curr_millis;
   local_curr_millis = millis();
 
-  detachInterrupt(digitalPinToInterrupt(hall_int)); // detach interrupt (atomic op)
+  detachInterrupt(digitalPinToInterrupt(HALL_INT)); // detach interrupt (atomic op)
   
   rpm = rpm_iter * 60000 / (local_curr_millis - local_prev_millis); // calc rpm
   
   rpm_iter = 0; // reset iterator
 
-  attachInterrupt(digitalPinToInterrupt(hall_int), hall_interrupt, FALLING); // reattach interrupt
+  attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING); // reattach interrupt
   
   return(rpm);
 }
@@ -232,7 +240,7 @@ uint8_t read_current(uint8_t adc_ch) {
   int16_t adc_val;
   
   adc_val = analogRead(adc_ch); // read adc
-  adc_val = abs(adc_val - 511); // center value
+  adc_val = abs(adc_val - CURR_CALIBRATION); // center value
   
   // return current (sensitivity: 100mV / 1A; 2.5V@0A (centered))
   return(adc_val / 2);
