@@ -155,7 +155,7 @@ void record_to_sd(uint8_t temp, uint16_t rpm, uint8_t current) {
     data_file.print("\t");
     data_file.print(rpm);
     data_file.print("\t");
-    data_file.print(current);
+    data_file.println(current);
     data_file.close();
   } else {
     digitalWrite(WRITE_ERR_LED, 1); // turn on indicator led
