@@ -13,6 +13,7 @@
 #define TEMP_LIMIT 100 // max motor temp
 #define INTERVAL 4000 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
+#define CYCLE_MAX 55000 // number of cycles to run
 
 struct time_buf {
   uint8_t secs;
@@ -62,7 +63,6 @@ uint8_t temp_buffer = 0; // temp buffer
 uint8_t current_buffer = 0; // current buffer
 uint16_t rpm_buffer = 0; // rpm buffer
 uint16_t cycle_iter = 0; // number of cycles passed
-uint16_t cycle_max = 60000; // number of cycles to run
 uint32_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis, curr_millis; // timing helpers
 
@@ -91,7 +91,7 @@ void loop() {
     // record time
     prev_millis = curr_millis;
 
-    if(cycle_iter < cycle_max) { // if havent finished
+    if(cycle_iter < CYCLE_MAX) { // if havent finished
       // measure temp
       temp_buffer = read_temp(THERM_PIN);
       
