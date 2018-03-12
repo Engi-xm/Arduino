@@ -18,7 +18,7 @@
 #define RPM_LIMIT 600 // min brush rpm on free rotation
 #define INTERVAL 200 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
-#define CYCLE_MAX 55000 // number of cycles to run
+#define CYCLE_MAX 10000 // number of cycles to run
 
 struct time_buf {
   uint8_t secs;
@@ -28,14 +28,16 @@ struct time_buf {
   uint8_t mnth;
 };
 
-void record_to_sd(uint8_t temp, uint16_t rpm, uint8_t current); // record time, current, rpm and temperature
+void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current); // record time, current, rpm and temperature
 void read_rtc(time_buf* buf); // read time
 void retract(uint8_t* piston_status); // retract cylinder routine
 void extend(uint8_t* piston_status); // extend cylinder routine
-void error(uint8_t code); // error routine (0 overheat, 1 overcurrent, 2 low rpm, 3 sd card)
+void blink_err_led(uint16_t off_period, uint16_t on_period); // error led blink helper function
+void error(uint8_t code); // error routine (0 overheat, 1 overcurrent, 2 low rpm, 3 sd card, 4 piston failure)
 uint8_t bcd_to_dec(uint8_t a); // convert bcd to dec
+uint8_t init_piston(uint8_t* piston_status); // initialize piston position
 uint8_t read_temp(uint8_t adc_ch); // read temperature from thermistor on adc channel
-uint8_t read_current(uint8_t adc_ch); // read current from sensor on adc channel
+uint16_t read_current(uint8_t adc_ch); // read current from sensor on adc channel
 uint16_t read_rpm(uint8_t cntrl); // read rpm of brush (0 to start, 1 to read)
 
 // thermistor lookup R1=9.95K Rt=100k@25C
@@ -68,21 +70,21 @@ uint16_t temp_lookup[][2] = {
 
 uint8_t interval_iter = 0; // interval iterator
 uint8_t temp_buffer = 0; // temp buffer
-uint8_t current_buffer = 0; // current buffer
 uint8_t piston_status = 0; // piston status flag (0 retracted, 1 extended)
+uint16_t current_buffer = 0; // current buffer
 uint16_t rpm_buffer = 0; // rpm buffer
 uint16_t cycle_iter = 0; // number of cycles passed
-uint32_t rpm_iter = 0; // rpm iterator
+uint16_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis, curr_millis; // timing variables
 
 void setup() {
-  Serial.begin(9600); // open serial port
+//  Serial.begin(9600); // open serial port for debugging
   Wire.begin(); // start i2c bus
 
   // initialize sd card
   if(!SD.begin()) error(3); 
  
-  attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING);
+//  attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING);
 
   pinMode(MACHINE_CTRL, OUTPUT);
   pinMode(ERR_LED, OUTPUT);
@@ -96,6 +98,10 @@ void setup() {
   digitalWrite(ERR_LED, 0);
   digitalWrite(EXTEND_RELAY, 0);
   digitalWrite(RETRACT_RELAY, 0);
+
+  if(!init_piston(&piston_status)) error(4);
+
+  delay(5000);
 }
 
 void loop() {
@@ -133,20 +139,16 @@ void loop() {
         read_rpm(0); // start rpm measurement
       }
   
-      // record and check info on 30th (6s) and 50th interval (10s)
-      if(interval_iter == 30 || interval_iter == 50) {
+      // record and check info on 25th (5s) and 50th interval (10s)
+      if(interval_iter == 25 || interval_iter == 50) {
         // record
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
         record_to_sd(temp_buffer, rpm_buffer, current_buffer);
 
-        // check
-        if(current_buffer >= CURR_LIMIT) {
-          error(1);
-        }
-        if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) {
-          error(2);
-        }
+        // check variables
+        if(current_buffer >= CURR_LIMIT) error(1);
+        if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2);
       }
   
       if(interval_iter == 50) { // every 10s
@@ -155,6 +157,7 @@ void loop() {
       }
     } else {
       digitalWrite(MACHINE_CTRL, 0); // if finished, turn machine off
+      retract(&piston_status); // retract machine
     }
   }
 
@@ -171,7 +174,7 @@ void loop() {
 //  delay(2000);
 }
 
-void record_to_sd(uint8_t temp, uint16_t rpm, uint8_t current) {
+void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current) {
   time_buf time_buffer;
 
   read_rtc(&time_buffer);
@@ -196,19 +199,46 @@ void record_to_sd(uint8_t temp, uint16_t rpm, uint8_t current) {
     data_file.print("\t");
     data_file.println(current);
     data_file.close();
-  } else {
-    while(1) {
-      error(3);
-    }
-  }
+  } else error(3);
 }
 
 uint8_t bcd_to_dec(uint8_t a) {
   return(a - 6 * (a >> 4));
 }
 
+uint8_t init_piston(uint8_t* piston_status) {
+  uint32_t i = 0; // iterator
+  uint32_t timeout_step = 500; // step in us for timeout (0.5ms)
+  uint32_t timeout_iters = 4000; // timeout period in timeout_steps (2s)
+  
+  digitalWrite(RETRACT_RELAY, 1); // try to retract
+  while(digitalRead(RETRACT_ENDSTOP)) { // wait to reach endstop
+    i++;
+    delayMicroseconds(timeout_step);
+    
+    if(i >= timeout_iters) { // if does not reach endstop in timeout_iters
+      i = 0; // reset iterator
+      digitalWrite(RETRACT_RELAY, 0); // turn off retract relay
+      delay(20);
+      digitalWrite(EXTEND_RELAY, 1); // extend
+      
+      while(digitalRead(RETRACT_ENDSTOP)) { // wait to reach endstop
+        i++;
+        delayMicroseconds(timeout_step);
+        if(i >= timeout_iters) return(0); // something wrong
+      }
+      
+      digitalWrite(EXTEND_RELAY, 0); // turn off extend relay
+    }
+  }
+
+  digitalWrite(RETRACT_RELAY, 0);
+  *piston_status = 0;
+  
+  return(1);
+}
+
 void read_rtc(time_buf* buf) {
-  // TODO: works
   uint8_t loc_buf[6];
   
   // set address to seconds
@@ -232,20 +262,45 @@ void read_rtc(time_buf* buf) {
 }
 
 void retract(uint8_t* piston_status) {
-  if(piston_status) {
+  uint32_t i = 0; // iterator
+  uint32_t timeout_step = 500; // step in us for timeout (0.5ms)
+  uint32_t timeout_iters = 6000; // timeout period in timeout_steps (3s)
+  
+  if(*piston_status) {
     digitalWrite(RETRACT_RELAY, 1);
-    while(digitalRead(RETRACT_ENDSTOP));
+    while(digitalRead(RETRACT_ENDSTOP)) { // if doesnt retract in timout period
+      i++;
+      delayMicroseconds(timeout_step);
+      if(i >= timeout_iters) error(4);
+    }
     digitalWrite(RETRACT_RELAY, 0);
     *piston_status = 0;
   }
 }
 
 void extend(uint8_t* piston_status) {
-  if(!piston_status) {
+  uint32_t i = 0; // iterator
+  uint32_t timeout_step = 500; // step in us for timeout (0.5ms)
+  uint32_t timeout_iters = 6000; // timeout period in timeout_steps (3s)
+
+  if(!(*piston_status)) {
     digitalWrite(EXTEND_RELAY, 1);
-    while(digitalRead(EXTEND_ENDSTOP));
+    while(digitalRead(EXTEND_ENDSTOP)) {
+      i++;
+      delayMicroseconds(timeout_step);
+      if(i >= timeout_iters) error(4);
+    }
     digitalWrite(EXTEND_RELAY, 0);
     *piston_status = 1;
+  }
+}
+
+void blink_err_led(uint16_t off_period, uint16_t on_period) {
+  while(1) {
+    digitalWrite(ERR_LED, 1);
+    delay(on_period);
+    digitalWrite(ERR_LED, 0);
+    delay(off_period);
   }
 }
 
@@ -257,30 +312,20 @@ void error(uint8_t code) {
     case 1: // overcurrent
       digitalWrite(MACHINE_CTRL, 0);
       retract(&piston_status);
-      while(1) {
-        digitalWrite(ERR_LED, 1);
-        delay(500);
-        digitalWrite(ERR_LED, 0);
-        delay(500);
-      }
+      blink_err_led(500, 500);
       break;
     case 2: // low rpm
       digitalWrite(MACHINE_CTRL, 0);
       retract(&piston_status);
-      while(1) {
-        digitalWrite(ERR_LED, 1);
-        delay(2000);
-        digitalWrite(ERR_LED, 0);
-        delay(500);
-      }
+      blink_err_led(2000, 500);
       break;
     case 3: // sd card
-      while(1) {
-        digitalWrite(ERR_LED, 1);
-        delay(500);
-        digitalWrite(ERR_LED, 0);
-        delay(2000);
-      }
+      digitalWrite(MACHINE_CTRL, 0);
+      blink_err_led(500, 2000);
+      break;
+    case 4: // piston failure
+      digitalWrite(MACHINE_CTRL, 0);
+      blink_err_led(2000, 2000);
       break;
   }
 }
@@ -339,7 +384,7 @@ uint16_t read_rpm(uint8_t cntrl) {
   }
 }
 
-uint8_t read_current(uint8_t adc_ch) {
+uint16_t read_current(uint8_t adc_ch) {
   int16_t adc_val;
   
   adc_val = analogRead(adc_ch); // read adc
