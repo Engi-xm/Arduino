@@ -14,9 +14,9 @@
 #define THERM_PIN A1 // thermistor pin
 #define CURR_PIN A3 // current sensor pin
 #define TEMP_LIMIT 100 // max motor temp
-#define CURR_LIMIT 200 // max current (dA)
+#define CURR_LIMIT 240 // max current (dA)
 #define RPM_LIMIT 600 // min brush rpm on free rotation
-#define INTERVAL 200 // INTERVAL for measurements
+#define INTERVAL 180 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
 #define CYCLE_MAX 10000 // number of cycles to run
 
@@ -78,27 +78,28 @@ uint16_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis, curr_millis; // timing variables
 
 void setup() {
+  // initialize combusses
 //  Serial.begin(9600); // open serial port for debugging
   Wire.begin(); // start i2c bus
 
   // initialize sd card
   if(!SD.begin()) error(3); 
- 
-//  attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING);
 
+  // initialize outputs
   pinMode(MACHINE_CTRL, OUTPUT);
   pinMode(ERR_LED, OUTPUT);
   pinMode(EXTEND_RELAY, OUTPUT);
   pinMode(RETRACT_RELAY, OUTPUT);
-  
-  pinMode(RETRACT_ENDSTOP, INPUT);
-  pinMode(EXTEND_ENDSTOP, INPUT);
-
   digitalWrite(MACHINE_CTRL, 0);
   digitalWrite(ERR_LED, 0);
   digitalWrite(EXTEND_RELAY, 0);
   digitalWrite(RETRACT_RELAY, 0);
 
+  // initialize inputs
+  pinMode(RETRACT_ENDSTOP, INPUT);
+  pinMode(EXTEND_ENDSTOP, INPUT);
+
+  // initialize piston to retracted position
   if(!init_piston(&piston_status)) error(4);
 
   delay(5000);
@@ -148,7 +149,7 @@ void loop() {
 
         // check variables
         if(current_buffer >= CURR_LIMIT) error(1);
-        if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2);
+        if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2); // check brush speed on free rotation
       }
   
       if(interval_iter == 50) { // every 10s
@@ -160,8 +161,19 @@ void loop() {
       retract(&piston_status); // retract machine
     }
   }
+  
+//  // ENDSTOP CALIBRATION (TODO: make a separate function)
+//  digitalWrite(MACHINE_CTRL, 1);
+//  digitalWrite(EXTEND_RELAY, 1);
+//  while(read_current(CURR_PIN) <= 180) {
+//    delayMicroseconds(200);
+//  }
+//  digitalWrite(EXTEND_RELAY, 0);
+//  delay(2000);
+//  digitalWrite(MACHINE_CTRL, 0);
+//  while(1);
 
-//  // SANITY CHECK
+//  // SANITY CHECKS
 //  digitalWrite(MACHINE_CTRL, 1);
 //  read_rpm(0);
 //  delay(5000);
@@ -172,6 +184,13 @@ void loop() {
 //  Serial.println(read_rpm(1));
 //  digitalWrite(MACHINE_CTRL, 0);
 //  delay(2000);
+//
+//  extend(&piston_status);
+//  delay(5000);
+//  retract(&piston_status);
+//  delay(5000);
+
+
 }
 
 void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current) {
@@ -263,35 +282,35 @@ void read_rtc(time_buf* buf) {
 
 void retract(uint8_t* piston_status) {
   uint32_t i = 0; // iterator
-  uint32_t timeout_step = 500; // step in us for timeout (0.5ms)
-  uint32_t timeout_iters = 6000; // timeout period in timeout_steps (3s)
+  uint32_t timeout_step = 200; // step in us for timeout (0.2ms)
+  uint32_t timeout_iters = 15000; // timeout period in timeout_steps (3s)
   
   if(*piston_status) {
     digitalWrite(RETRACT_RELAY, 1);
-    while(digitalRead(RETRACT_ENDSTOP)) { // if doesnt retract in timout period
+    while(digitalRead(RETRACT_ENDSTOP)) {
       i++;
       delayMicroseconds(timeout_step);
-      if(i >= timeout_iters) error(4);
+      if(i >= timeout_iters) error(4); // if doesnt retract in timout period
     }
     digitalWrite(RETRACT_RELAY, 0);
-    *piston_status = 0;
+    *piston_status = 0; // set flag
   }
 }
 
 void extend(uint8_t* piston_status) {
   uint32_t i = 0; // iterator
-  uint32_t timeout_step = 500; // step in us for timeout (0.5ms)
-  uint32_t timeout_iters = 6000; // timeout period in timeout_steps (3s)
+  uint32_t timeout_step = 200; // step in us for timeout (0.2ms)
+  uint32_t timeout_iters = 15000; // timeout period in timeout_steps (3s)
 
   if(!(*piston_status)) {
     digitalWrite(EXTEND_RELAY, 1);
     while(digitalRead(EXTEND_ENDSTOP)) {
       i++;
       delayMicroseconds(timeout_step);
-      if(i >= timeout_iters) error(4);
+      if(i >= timeout_iters) error(4); // if doesnt extend in timeout period
     }
     digitalWrite(EXTEND_RELAY, 0);
-    *piston_status = 1;
+    *piston_status = 1; // set flag
   }
 }
 
