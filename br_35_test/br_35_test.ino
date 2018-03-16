@@ -16,7 +16,7 @@
 #define TEMP_LIMIT 100 // max motor temp
 #define CURR_LIMIT 240 // max current (dA)
 #define RPM_LIMIT 600 // min brush rpm on free rotation
-#define INTERVAL 180 // INTERVAL for measurements
+#define INTERVAL 190 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
 #define CYCLE_MAX 10000 // number of cycles to run
 
@@ -136,12 +136,12 @@ void loop() {
         extend(&piston_status); // 2s/10s
 
       // start rpm measurement
-      if(interval_iter == 1 || interval_iter == 45) {
+      if(interval_iter == 5 || interval_iter == 45) {
         read_rpm(0); // start rpm measurement
       }
   
-      // record and check info on 25th (5s) and 50th interval (10s)
-      if(interval_iter == 25 || interval_iter == 50) {
+      // record and check info every 5s
+      if(interval_iter == 26 || interval_iter == 52) {
         // record
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
@@ -152,7 +152,7 @@ void loop() {
         if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2); // check brush speed on free rotation
       }
   
-      if(interval_iter == 50) { // every 10s
+      if(interval_iter == 52) { // every 10s
         interval_iter = 0; // reset iteration
         cycle_iter++; // iterate cycles
       }
