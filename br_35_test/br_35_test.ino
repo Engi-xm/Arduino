@@ -15,7 +15,7 @@
 #define CURR_PIN A3 // current sensor pin
 #define TEMP_LIMIT 100 // max motor temp
 #define CURR_LIMIT 240 // max current (dA)
-#define RPM_LIMIT 600 // min brush rpm on free rotation
+#define RPM_LIMIT 500 // min brush rpm on free rotation
 #define INTERVAL 190 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
 #define CYCLE_MAX 10000 // number of cycles to run
@@ -136,7 +136,7 @@ void loop() {
         extend(&piston_status); // 2s/10s
 
       // start rpm measurement
-      if(interval_iter == 5 || interval_iter == 45) {
+      if(interval_iter == 5 || interval_iter == 48) {
         read_rpm(0); // start rpm measurement
       }
   
@@ -166,7 +166,7 @@ void loop() {
 //  digitalWrite(MACHINE_CTRL, 1);
 //  digitalWrite(EXTEND_RELAY, 1);
 //  while(read_current(CURR_PIN) <= 180) {
-//    delayMicroseconds(200);
+//    delayMicroseconds(50);
 //  }
 //  digitalWrite(EXTEND_RELAY, 0);
 //  delay(2000);
