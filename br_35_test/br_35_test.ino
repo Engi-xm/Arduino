@@ -75,15 +75,13 @@ uint16_t current_buffer = 0; // current buffer
 uint16_t rpm_buffer = 0; // rpm buffer
 uint16_t cycle_iter = 0; // number of cycles passed
 uint16_t rpm_iter = 0; // rpm iterator
-uint32_t prev_millis, curr_millis; // timing variables
+uint32_t prev_millis = 0; // timing variable
+uint32_t curr_millis = 0; // timing variable
 
 void setup() {
   // initialize combusses
 //  Serial.begin(9600); // open serial port for debugging
   Wire.begin(); // start i2c bus
-
-  // initialize sd card
-  if(!SD.begin()) error(3); 
 
   // initialize outputs
   pinMode(MACHINE_CTRL, OUTPUT);
@@ -98,6 +96,9 @@ void setup() {
   // initialize inputs
   pinMode(RETRACT_ENDSTOP, INPUT);
   pinMode(EXTEND_ENDSTOP, INPUT);
+
+  // initialize sd card
+  if(!SD.begin()) error(3); 
 
   // initialize piston to retracted position
   if(!init_piston(&piston_status)) error(4);
@@ -122,6 +123,7 @@ void loop() {
         record_to_sd(temp_buffer, 0, 0);
         error(0);
         digitalWrite(MACHINE_CTRL, 0); // turn off machine
+        retract(&piston_status); // retract
         delay(OVERHEAT_REST_INTERVAL);
         record_to_sd(temp_buffer, 0, 0);
         interval_iter = 0;
@@ -161,7 +163,7 @@ void loop() {
       retract(&piston_status); // retract machine
     }
   }
-  
+
 //  // ENDSTOP CALIBRATION (TODO: make a separate function)
 //  digitalWrite(MACHINE_CTRL, 1);
 //  digitalWrite(EXTEND_RELAY, 1);
@@ -340,6 +342,7 @@ void error(uint8_t code) {
       break;
     case 3: // sd card
       digitalWrite(MACHINE_CTRL, 0);
+      retract(&piston_status);
       blink_err_led(500, 2000);
       break;
     case 4: // piston failure
