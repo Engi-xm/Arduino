@@ -28,7 +28,7 @@ struct time_buf {
   uint8_t mnth;
 };
 
-void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current); // record time, current, rpm and temperature
+void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current, uint16_t cycle); // record data to sd
 void read_rtc(time_buf* buf); // read time
 void retract(uint8_t* piston_status); // retract cylinder routine
 void extend(uint8_t* piston_status); // extend cylinder routine
@@ -119,13 +119,14 @@ void loop() {
       temp_buffer = read_temp(THERM_PIN);
       
       // if overheating, rest
-      if(temp_buffer >= TEMP_LIMIT) {
-        record_to_sd(temp_buffer, 0, 0);
-        error(0);
+      while(temp_buffer >= TEMP_LIMIT) {
         digitalWrite(MACHINE_CTRL, 0); // turn off machine
         retract(&piston_status); // retract
+        record_to_sd(temp_buffer, 0, 0, cycle_iter);
+        error(0);
         delay(OVERHEAT_REST_INTERVAL);
-        record_to_sd(temp_buffer, 0, 0);
+        temp_buffer = read_temp(THERM_PIN);
+        record_to_sd(temp_buffer, 0, 0, cycle_iter);
         interval_iter = 0;
       }
 
@@ -147,7 +148,7 @@ void loop() {
         // record
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
-        record_to_sd(temp_buffer, rpm_buffer, current_buffer);
+        record_to_sd(temp_buffer, rpm_buffer, current_buffer, cycle_iter);
 
         // check variables
         if(current_buffer >= CURR_LIMIT) error(1);
@@ -186,16 +187,15 @@ void loop() {
 //  Serial.println(read_rpm(1));
 //  digitalWrite(MACHINE_CTRL, 0);
 //  delay(2000);
-//
 //  extend(&piston_status);
 //  delay(5000);
 //  retract(&piston_status);
 //  delay(5000);
-
-
+//  delay(1000);
+//  record_to_sd(5, 10, 15);
 }
 
-void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current) {
+void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current, uint16_t cycle) {
   time_buf time_buffer;
 
   read_rtc(&time_buffer);
@@ -204,6 +204,8 @@ void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current) {
   
   // if the file is available, write to it:
   if (data_file) {
+    data_file.print(cycle);
+    data_file.print("\t");
     data_file.print(time_buffer.mnth);
     data_file.print('-');
     data_file.print(time_buffer.day);
@@ -381,7 +383,6 @@ uint8_t read_temp(uint8_t adc_ch) {
 uint16_t read_rpm(uint8_t cntrl) {
   static uint32_t local_prev_millis = 0; // local millis buffer
   static uint32_t local_curr_millis = 0; // local millis buffer
-  uint16_t rpm; // rpm result
   
   if(!cntrl) {
     rpm_iter = 0; // reset iterator
@@ -392,17 +393,13 @@ uint16_t read_rpm(uint8_t cntrl) {
     
     return(1);
   } else {
-    detachInterrupt(digitalPinToInterrupt(HALL_INT)); // detach interrupt (atomic op)
+    detachInterrupt(digitalPinToInterrupt(HALL_INT)); // detach interrupt
 
     // record time
     local_prev_millis = local_curr_millis;
     local_curr_millis = millis();
-    
-    rpm = rpm_iter * 60000 / (local_curr_millis - local_prev_millis); // calc rpm
-    
-    rpm_iter = 0; // reset iterator
   
-    return(rpm);
+    return(rpm_iter * (60000 / (local_curr_millis - local_prev_millis))); // calc rpm
   }
 }
 
