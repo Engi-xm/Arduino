@@ -16,7 +16,7 @@
 #define TEMP_LIMIT 100 // max motor temp
 #define CURR_LIMIT 240 // max current (dA)
 #define RPM_LIMIT 500 // min brush rpm on free rotation
-#define INTERVAL 190 // INTERVAL for measurements
+#define INTERVAL 195 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
 #define CYCLE_MAX 10000 // number of cycles to run
 
@@ -73,7 +73,7 @@ uint8_t temp_buffer = 0; // temp buffer
 uint8_t piston_status = 0; // piston status flag (0 retracted, 1 extended)
 uint16_t current_buffer = 0; // current buffer
 uint16_t rpm_buffer = 0; // rpm buffer
-uint16_t cycle_iter = 0; // number of cycles passed
+uint16_t cycle_iter = 1; // cycle number
 uint16_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis = 0; // timing variable
 uint32_t curr_millis = 0; // timing variable
@@ -114,7 +114,7 @@ void loop() {
     // record time
     prev_millis = curr_millis;
 
-    if(cycle_iter < CYCLE_MAX) { // if havent finished
+    if(cycle_iter <= CYCLE_MAX) { // if havent finished
       // measure temp
       temp_buffer = read_temp(THERM_PIN);
       
@@ -129,22 +129,24 @@ void loop() {
         record_to_sd(temp_buffer, 0, 0, cycle_iter);
         interval_iter = 0;
       }
-
-      // check if running, start if not
-      digitalRead(MACHINE_CTRL) ? void() : digitalWrite(MACHINE_CTRL, 1);
       
       // control machine
       ++interval_iter <= 40 ? 
         retract(&piston_status) : // 8s/10s
         extend(&piston_status); // 2s/10s
 
+      ((interval_iter >=  5 && interval_iter < 40) ||
+       (interval_iter >= 45 && interval_iter < 57)) ? 
+        digitalWrite(MACHINE_CTRL, 1) :
+        digitalWrite(MACHINE_CTRL, 0);
+
       // start rpm measurement
-      if(interval_iter == 5 || interval_iter == 48) {
+      if(interval_iter == 7 || interval_iter == 47) { // allow 1s to retract/ extend
         read_rpm(0); // start rpm measurement
       }
   
-      // record and check info every 5s
-      if(interval_iter == 26 || interval_iter == 52) {
+      // record and check info
+      if(interval_iter == 16 || interval_iter == 56) {
         // record
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
@@ -155,7 +157,7 @@ void loop() {
         if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2); // check brush speed on free rotation
       }
   
-      if(interval_iter == 52) { // every 10s
+      if(interval_iter == 60) { // every ~10s
         interval_iter = 0; // reset iteration
         cycle_iter++; // iterate cycles
       }
