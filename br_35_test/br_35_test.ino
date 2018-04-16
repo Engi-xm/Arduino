@@ -135,18 +135,18 @@ void loop() {
         retract(&piston_status) : // 8s/10s
         extend(&piston_status); // 2s/10s
 
-      ((interval_iter >=  5 && interval_iter < 40) ||
+      ((interval_iter >=  2 && interval_iter < 40) ||
        (interval_iter >= 45 && interval_iter < 57)) ? 
         digitalWrite(MACHINE_CTRL, 1) :
         digitalWrite(MACHINE_CTRL, 0);
 
       // start rpm measurement
-      if(interval_iter == 7 || interval_iter == 47) { // allow 1s to retract/ extend
+      if(interval_iter == 4 || interval_iter == 47) { // allow time to retract/ extend
         read_rpm(0); // start rpm measurement
       }
   
       // record and check info
-      if(interval_iter == 16 || interval_iter == 56) {
+      if(interval_iter == 13 || interval_iter == 56) {
         // record
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
