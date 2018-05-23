@@ -16,7 +16,7 @@
 #define TEMP_LIMIT 100 // max motor temp
 #define CURR_LIMIT 240 // max current (dA)
 #define RPM_LIMIT 500 // min brush rpm on free rotation
-#define INTERVAL 195 // INTERVAL for measurements
+#define INTERVAL 190 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
 #define CYCLE_MAX 10000 // number of cycles to run
 
@@ -28,7 +28,7 @@ struct time_buf {
   uint8_t mnth;
 };
 
-void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current, uint16_t cycle); // record data to sd
+void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current, uint16_t cycle); // record time, current, rpm and temperature
 void read_rtc(time_buf* buf); // read time
 void retract(uint8_t* piston_status); // retract cylinder routine
 void extend(uint8_t* piston_status); // extend cylinder routine
@@ -73,7 +73,7 @@ uint8_t temp_buffer = 0; // temp buffer
 uint8_t piston_status = 0; // piston status flag (0 retracted, 1 extended)
 uint16_t current_buffer = 0; // current buffer
 uint16_t rpm_buffer = 0; // rpm buffer
-uint16_t cycle_iter = 1; // cycle number
+uint16_t cycle_iter = 0; // number of cycles passed
 uint16_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis = 0; // timing variable
 uint32_t curr_millis = 0; // timing variable
@@ -96,7 +96,7 @@ void setup() {
   // initialize inputs
   pinMode(RETRACT_ENDSTOP, INPUT);
   pinMode(EXTEND_ENDSTOP, INPUT);
-
+  
   // initialize sd card
   if(!SD.begin()) error(3); 
 
@@ -114,14 +114,14 @@ void loop() {
     // record time
     prev_millis = curr_millis;
 
-    if(cycle_iter <= CYCLE_MAX) { // if havent finished
+    if(cycle_iter < CYCLE_MAX) { // if havent finished
       // measure temp
       temp_buffer = read_temp(THERM_PIN);
       
       // if overheating, rest
       while(temp_buffer >= TEMP_LIMIT) {
         digitalWrite(MACHINE_CTRL, 0); // turn off machine
-        retract(&piston_status); // retract
+        retract(&piston_status);
         record_to_sd(temp_buffer, 0, 0, cycle_iter);
         error(0);
         delay(OVERHEAT_REST_INTERVAL);
@@ -129,24 +129,22 @@ void loop() {
         record_to_sd(temp_buffer, 0, 0, cycle_iter);
         interval_iter = 0;
       }
+
+      // check if running, start if not
+      digitalRead(MACHINE_CTRL) ? void() : digitalWrite(MACHINE_CTRL, 1);
       
       // control machine
       ++interval_iter <= 40 ? 
         retract(&piston_status) : // 8s/10s
         extend(&piston_status); // 2s/10s
 
-      ((interval_iter >=  2 && interval_iter < 40) ||
-       (interval_iter >= 45 && interval_iter < 57)) ? 
-        digitalWrite(MACHINE_CTRL, 1) :
-        digitalWrite(MACHINE_CTRL, 0);
-
       // start rpm measurement
-      if(interval_iter == 4 || interval_iter == 47) { // allow time to retract/ extend
+      if(interval_iter == 5 || interval_iter == 48) {
         read_rpm(0); // start rpm measurement
       }
   
-      // record and check info
-      if(interval_iter == 13 || interval_iter == 56) {
+      // record and check info every 5s
+      if(interval_iter == 26 || interval_iter == 52) {
         // record
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
@@ -157,7 +155,7 @@ void loop() {
         if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2); // check brush speed on free rotation
       }
   
-      if(interval_iter == 60) { // every ~10s
+      if(interval_iter == 52) { // every 10s
         interval_iter = 0; // reset iteration
         cycle_iter++; // iterate cycles
       }
@@ -166,7 +164,7 @@ void loop() {
       retract(&piston_status); // retract machine
     }
   }
-
+  
 //  // ENDSTOP CALIBRATION (TODO: make a separate function)
 //  digitalWrite(MACHINE_CTRL, 1);
 //  digitalWrite(EXTEND_RELAY, 1);
@@ -189,12 +187,13 @@ void loop() {
 //  Serial.println(read_rpm(1));
 //  digitalWrite(MACHINE_CTRL, 0);
 //  delay(2000);
+//
 //  extend(&piston_status);
 //  delay(5000);
 //  retract(&piston_status);
 //  delay(5000);
-//  delay(1000);
-//  record_to_sd(5, 10, 15);
+
+
 }
 
 void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current, uint16_t cycle) {
@@ -400,7 +399,7 @@ uint16_t read_rpm(uint8_t cntrl) {
     // record time
     local_prev_millis = local_curr_millis;
     local_curr_millis = millis();
-  
+   
     return(rpm_iter * (60000 / (local_curr_millis - local_prev_millis))); // calc rpm
   }
 }
