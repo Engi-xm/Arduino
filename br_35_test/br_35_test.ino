@@ -18,7 +18,7 @@
 #define RPM_LIMIT 500 // min brush rpm on free rotation
 #define INTERVAL 190 // INTERVAL for measurements
 #define CURR_CALIBRATION 508 // value for centering adc value
-#define CYCLE_MAX 10000 // number of cycles to run
+#define CYCLE_MAX 5000 // number of cycles to run
 
 struct time_buf {
   uint8_t secs;
@@ -164,36 +164,6 @@ void loop() {
       retract(&piston_status); // retract machine
     }
   }
-  
-//  // ENDSTOP CALIBRATION (TODO: make a separate function)
-//  digitalWrite(MACHINE_CTRL, 1);
-//  digitalWrite(EXTEND_RELAY, 1);
-//  while(read_current(CURR_PIN) <= 180) {
-//    delayMicroseconds(50);
-//  }
-//  digitalWrite(EXTEND_RELAY, 0);
-//  delay(2000);
-//  digitalWrite(MACHINE_CTRL, 0);
-//  while(1);
-
-//  // SANITY CHECKS
-//  digitalWrite(MACHINE_CTRL, 1);
-//  read_rpm(0);
-//  delay(5000);
-//  Serial.print(read_temp(THERM_PIN));
-//  Serial.print("\t");
-//  Serial.print(read_current(CURR_PIN));
-//  Serial.print("\t");
-//  Serial.println(read_rpm(1));
-//  digitalWrite(MACHINE_CTRL, 0);
-//  delay(2000);
-//
-//  extend(&piston_status);
-//  delay(5000);
-//  retract(&piston_status);
-//  delay(5000);
-
-
 }
 
 void record_to_sd(uint8_t temp, uint16_t rpm, uint16_t current, uint16_t cycle) {
