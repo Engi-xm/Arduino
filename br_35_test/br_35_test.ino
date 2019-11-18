@@ -17,7 +17,7 @@
 #define CURR_LIMIT 240 // max current (dA)
 #define RPM_LIMIT 500 // min brush rpm on free rotation
 #define INTERVAL 190 // INTERVAL for measurements
-#define CURR_CALIBRATION 508 // value for centering adc value
+#define CURR_CALIBRATION 530 // value for centering adc value
 #define CYCLE_MAX 5000 // number of cycles to run
 
 struct time_buf {
@@ -78,9 +78,11 @@ uint16_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis = 0; // timing variable
 uint32_t curr_millis = 0; // timing variable
 
+uint32_t i = 0;
+
 void setup() {
   // initialize combusses
-//  Serial.begin(9600); // open serial port for debugging
+  Serial.begin(9600); // open serial port for debugging
   Wire.begin(); // start i2c bus
 
   // initialize outputs
