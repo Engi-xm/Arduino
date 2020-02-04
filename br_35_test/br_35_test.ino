@@ -13,12 +13,15 @@
 #define OVERHEAT_REST_INTERVAL 300000 // 5mins
 #define THERM_PIN A1 // thermistor pin
 #define CURR_PIN A3 // current sensor pin
+#define TEMP_MIN_LIMIT 10 // min motor temp (for error checking)
 #define TEMP_LIMIT 100 // max motor temp
-#define CURR_LIMIT 240 // max current (dA)
-#define RPM_LIMIT 500 // min brush rpm on free rotation
-#define INTERVAL 190 // INTERVAL for measurements
+#define CURR_MIN_LIMIT 10 // min current (for error checking)
+#define CURR_LIMIT 180 // max current (dA)
+#define RPM_MIN_LIMIT 200 // min brush rpm
+#define RPM_LIMIT 1500 // max brush rpm (for error checking)
+#define INTERVAL 4000 // INTERVAL for measurements
 #define CURR_CALIBRATION 530 // value for centering adc value
-#define CYCLE_MAX 5000 // number of cycles to run
+#define CYCLE_MAX 10000 // number of cycles to run
 
 struct time_buf {
   uint8_t secs;
@@ -78,92 +81,104 @@ uint16_t rpm_iter = 0; // rpm iterator
 uint32_t prev_millis = 0; // timing variable
 uint32_t curr_millis = 0; // timing variable
 
-uint32_t i = 0;
-
 void setup() {
   // initialize combusses
-  Serial.begin(9600); // open serial port for debugging
+//  Serial.begin(9600); // open serial port for debugging
   Wire.begin(); // start i2c bus
 
   // initialize outputs
   pinMode(MACHINE_CTRL, OUTPUT);
   pinMode(ERR_LED, OUTPUT);
-  pinMode(EXTEND_RELAY, OUTPUT);
-  pinMode(RETRACT_RELAY, OUTPUT);
+//  pinMode(EXTEND_RELAY, OUTPUT);
+//  pinMode(RETRACT_RELAY, OUTPUT);
   digitalWrite(MACHINE_CTRL, 0);
   digitalWrite(ERR_LED, 0);
-  digitalWrite(EXTEND_RELAY, 0);
-  digitalWrite(RETRACT_RELAY, 0);
+//  digitalWrite(EXTEND_RELAY, 0);
+//  digitalWrite(RETRACT_RELAY, 0);
 
-  // initialize inputs
-  pinMode(RETRACT_ENDSTOP, INPUT);
-  pinMode(EXTEND_ENDSTOP, INPUT);
+//  // initialize inputs
+//  pinMode(RETRACT_ENDSTOP, INPUT);
+//  pinMode(EXTEND_ENDSTOP, INPUT);
   
   // initialize sd card
   if(!SD.begin()) error(3); 
 
-  // initialize piston to retracted position
-  if(!init_piston(&piston_status)) error(4);
+//  // initialize piston to retracted position
+//  if(!init_piston(&piston_status)) error(4);
 
-  delay(5000);
+  delay(3000);
 }
 
 void loop() {
+  // measure temp
+  temp_buffer = read_temp(THERM_PIN);
+
+  // if overheating, rest
+  while(temp_buffer >= TEMP_LIMIT) {
+    // check if actually overheating
+    delay(1000);
+    temp_buffer = read_temp(THERM_PIN);
+    if((temp_buffer < TEMP_LIMIT) && (temp_buffer > TEMP_MIN_LIMIT)) break;
+    
+    digitalWrite(MACHINE_CTRL, 0); // turn off machine
+    record_to_sd(temp_buffer, 0, 0, cycle_iter);
+    error(0);
+    delay(OVERHEAT_REST_INTERVAL);
+    temp_buffer = read_temp(THERM_PIN);
+    record_to_sd(temp_buffer, 0, 0, cycle_iter);
+    interval_iter = 0;
+  }
+
+  // if something wrong with thermistor, stop
+  if(temp_buffer <= TEMP_MIN_LIMIT) {
+    // check if actually somethings wrong
+    delay(1000);
+    temp_buffer = read_temp(THERM_PIN);
+    if((temp_buffer < TEMP_LIMIT) && (temp_buffer > TEMP_MIN_LIMIT)) break;
+    
+    digitalWrite(MACHINE_CTRL, 0);
+    record_to_sd(temp_buffer, 0, 0, cycle_iter);
+    error(5);
+  }
+
+  delay(500);
+  
   // check time
   curr_millis = millis();
 
-  if(curr_millis - prev_millis >= INTERVAL) { // if INTERVAL reached (every .2s)
+  if(curr_millis - prev_millis >= INTERVAL) { // if INTERVAL reached (every 4s)
     // record time
     prev_millis = curr_millis;
 
     if(cycle_iter < CYCLE_MAX) { // if havent finished
-      // measure temp
-      temp_buffer = read_temp(THERM_PIN);
-      
-      // if overheating, rest
-      while(temp_buffer >= TEMP_LIMIT) {
-        digitalWrite(MACHINE_CTRL, 0); // turn off machine
-        retract(&piston_status);
-        record_to_sd(temp_buffer, 0, 0, cycle_iter);
-        error(0);
-        delay(OVERHEAT_REST_INTERVAL);
-        temp_buffer = read_temp(THERM_PIN);
-        record_to_sd(temp_buffer, 0, 0, cycle_iter);
-        interval_iter = 0;
-      }
-
-      // check if running, start if not
-      digitalRead(MACHINE_CTRL) ? void() : digitalWrite(MACHINE_CTRL, 1);
-      
+          
       // control machine
-      ++interval_iter <= 40 ? 
-        retract(&piston_status) : // 8s/10s
-        extend(&piston_status); // 2s/10s
+      ++interval_iter <= 14 ? 
+        digitalWrite(MACHINE_CTRL, 1) : // 56s/60s
+        digitalWrite(MACHINE_CTRL, 0); // 4s/60s
 
       // start rpm measurement
-      if(interval_iter == 5 || interval_iter == 48) {
-        read_rpm(0); // start rpm measurement
+      if(interval_iter == 1 || interval_iter == 8) {
+        read_rpm(0);
       }
   
-      // record and check info every 5s
-      if(interval_iter == 26 || interval_iter == 52) {
-        // record
+      // record info to sd on 7th and 14th intervals
+      if(interval_iter == 7 || interval_iter == 14) {
         current_buffer = read_current(CURR_PIN); // record current
         rpm_buffer = read_rpm(1); // record rpm
         record_to_sd(temp_buffer, rpm_buffer, current_buffer, cycle_iter);
 
         // check variables
-        if(current_buffer >= CURR_LIMIT) error(1);
-        if(interval_iter <= 40 && rpm_buffer <= RPM_LIMIT) error(2); // check brush speed on free rotation
+        if((current_buffer >= CURR_LIMIT) || (current_buffer <= CURR_MIN_LIMIT)) error(1); // check current
+        if((rpm_buffer <= RPM_MIN_LIMIT) || (rpm_buffer >= RPM_LIMIT)) error(2); // check brush speed
       }
   
-      if(interval_iter == 52) { // every 10s
+      if(interval_iter == 15) { // every 60s
         interval_iter = 0; // reset iteration
         cycle_iter++; // iterate cycles
       }
     } else {
       digitalWrite(MACHINE_CTRL, 0); // if finished, turn machine off
-      retract(&piston_status); // retract machine
     }
   }
 }
@@ -203,9 +218,9 @@ uint8_t bcd_to_dec(uint8_t a) {
 }
 
 uint8_t init_piston(uint8_t* piston_status) {
-  uint32_t i = 0; // iterator
-  uint32_t timeout_step = 500; // step in us for timeout (0.5ms)
-  uint32_t timeout_iters = 4000; // timeout period in timeout_steps (2s)
+  uint16_t i = 0; // iterator
+  uint16_t timeout_step = 500; // step in us for timeout (0.5ms)
+  uint16_t timeout_iters = 4000; // timeout period in timeout_steps (2s)
   
   digitalWrite(RETRACT_RELAY, 1); // try to retract
   while(digitalRead(RETRACT_ENDSTOP)) { // wait to reach endstop
@@ -258,9 +273,9 @@ void read_rtc(time_buf* buf) {
 }
 
 void retract(uint8_t* piston_status) {
-  uint32_t i = 0; // iterator
-  uint32_t timeout_step = 200; // step in us for timeout (0.2ms)
-  uint32_t timeout_iters = 15000; // timeout period in timeout_steps (3s)
+  uint8_t timeout_step = 200; // step in us for timeout (0.2ms)
+  uint16_t timeout_iters = 15000; // timeout period in timeout_steps (3s)
+  uint16_t i = 0; // iterator
   
   if(*piston_status) {
     digitalWrite(RETRACT_RELAY, 1);
@@ -275,9 +290,9 @@ void retract(uint8_t* piston_status) {
 }
 
 void extend(uint8_t* piston_status) {
-  uint32_t i = 0; // iterator
-  uint32_t timeout_step = 200; // step in us for timeout (0.2ms)
-  uint32_t timeout_iters = 15000; // timeout period in timeout_steps (3s)
+  uint8_t timeout_step = 200; // step in us for timeout (0.2ms)
+  uint16_t timeout_iters = 15000; // timeout period in timeout_steps (3s)
+  uint16_t i = 0; // iterator
 
   if(!(*piston_status)) {
     digitalWrite(EXTEND_RELAY, 1);
@@ -305,12 +320,12 @@ void error(uint8_t code) {
     case 0: // overheat
       digitalWrite(ERR_LED, 1);
       break;
-    case 1: // overcurrent
+    case 1: // overcurrent (or sensor problem)
       digitalWrite(MACHINE_CTRL, 0);
       retract(&piston_status);
       blink_err_led(500, 500);
       break;
-    case 2: // low rpm
+    case 2: // low rpm (or sensor problem)
       digitalWrite(MACHINE_CTRL, 0);
       retract(&piston_status);
       blink_err_led(2000, 500);
@@ -324,14 +339,18 @@ void error(uint8_t code) {
       digitalWrite(MACHINE_CTRL, 0);
       blink_err_led(2000, 2000);
       break;
+    case 5: // thermistor failure
+      digitalWrite(MACHINE_CTRL, 0);
+      blink_err_led(1000, 200);
+      break;
   }
 }
 
 uint8_t read_temp(uint8_t adc_ch) {
-  uint16_t adc_val;
   uint8_t i = 0;
-  uint16_t adc_val0, adc_val1; // values for linear interpolation
   uint8_t temp0, temp1; // values for linear interpolation
+  uint16_t adc_val0, adc_val1; // values for linear interpolation
+  uint16_t adc_val;
   
   adc_val = analogRead(adc_ch);
 
@@ -359,19 +378,16 @@ uint16_t read_rpm(uint8_t cntrl) {
   
   if(!cntrl) {
     rpm_iter = 0; // reset iterator
-    
     local_curr_millis = millis();
-    
-    attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING); // reattach interrupt    
+    attachInterrupt(digitalPinToInterrupt(HALL_INT), hall_interrupt, FALLING); // reattach interrupt
     
     return(1);
   } else {
     detachInterrupt(digitalPinToInterrupt(HALL_INT)); // detach interrupt
-
     // record time
     local_prev_millis = local_curr_millis;
     local_curr_millis = millis();
-   
+  
     return(rpm_iter * (60000 / (local_curr_millis - local_prev_millis))); // calc rpm
   }
 }
